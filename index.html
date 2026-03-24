@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NIE — Narrative Intelligence Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ── TOKENS ──────────────────────────────────────────────────────────────── */
+:root {
+  --ink:       #0e0d0b;
+  --ink2:      #1c1a16;
+  --ink3:      #2a2720;
+  --rule:      #2e2b24;
+  --rule2:     #3d3930;
+  --muted:     #7a7060;
+  --ghost:     #4a4438;
+  --cream:     #f0ead8;
+  --parchment: #e8dfc8;
+  --gold:      #c9a84c;
+  --gold2:     #e8c76a;
+  --amber:     #d4793a;
+  --rose:      #c45c5c;
+  --teal:      #4a9a8c;
+  --teal2:     #6abcae;
+  --violet:    #7a5fa8;
+  --text:      #e8dfc8;
+  --text2:     #b0a48c;
+  --text3:     #7a7060;
+
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body:    'Outfit', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+
+  /* API endpoints — override these */
+  --naf-api:     http://127.0.0.1:8000;
+  --courtney-api: https://YOUR_TREND_BIAS_API_URL;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Grain overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 256px;
+  opacity: 0.35;
+}
+
+/* ── LAYOUT ──────────────────────────────────────────────────────────────── */
+.shell { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── TOPBAR ──────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 36px;
+  border-bottom: 1px solid var(--rule);
+  background: rgba(14,13,11,0.85);
+  backdrop-filter: blur(12px);
+  position: sticky; top: 0; z-index: 100;
+}
+.wordmark {
+  display: flex; align-items: baseline; gap: 10px;
+}
+.wordmark-nie {
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 900; letter-spacing: -0.02em;
+  color: var(--cream);
+}
+.wordmark-nie em { font-style: italic; color: var(--gold); }
+.wordmark-full {
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--ghost); letter-spacing: 0.18em; text-transform: uppercase;
+}
+.topbar-status {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--ghost);
+}
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ghost); transition: background 0.3s;
+}
+.status-dot.live { background: var(--teal); box-shadow: 0 0 6px var(--teal); animation: pulse 2s infinite; }
+.status-dot.error { background: var(--rose); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+/* ── MAIN GRID ───────────────────────────────────────────────────────────── */
+.main-grid {
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── LEFT PANEL ──────────────────────────────────────────────────────────── */
+.left-panel {
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  height: calc(100vh - 61px);
+  position: sticky; top: 61px;
+  overflow-y: auto;
+}
+.left-panel::-webkit-scrollbar { width: 3px; }
+.left-panel::-webkit-scrollbar-track { background: transparent; }
+.left-panel::-webkit-scrollbar-thumb { background: var(--rule2); border-radius: 2px; }
+
+/* Upload zone */
+.upload-zone {
+  padding: 32px;
+  border-bottom: 1px solid var(--rule);
+}
+.upload-zone-label {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--ghost); margin-bottom: 16px;
+}
+.drop-target {
+  border: 1px dashed var(--rule2);
+  border-radius: 4px;
+  padding: 32px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: rgba(255,255,255,0.01);
+  position: relative;
+}
+.drop-target:hover, .drop-target.drag-over {
+  border-color: var(--gold);
+  background: rgba(201,168,76,0.04);
+}
+.drop-target input[type=file] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+.drop-icon {
+  width: 40px; height: 40px; margin: 0 auto 12px;
+  border: 1px solid var(--rule2); border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ghost); font-size: 18px;
+  transition: all 0.2s;
+}
+.drop-target:hover .drop-icon { border-color: var(--gold); color: var(--gold); }
+.drop-title { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
+.drop-sub { font-family: var(--font-mono); font-size: 10px; color: var(--ghost); }
+.file-loaded {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: rgba(201,168,76,0.06); border: 1px solid rgba(201,168,76,0.2);
+  border-radius: 4px; margin-top: 10px;
+}
+.file-loaded-name { font-family: var(--font-mono); font-size: 11px; color: var(--gold2); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-clear { background: none; border: none; color: var(--ghost); cursor: pointer; font-size: 16px; line-height: 1; padding: 0; }
+.file-clear:hover { color: var(--rose); }
+
+/* Script preview */
+.script-preview {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--rule);
+  flex: 1;
+}
+.preview-label {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--ghost); margin-bottom: 12px;
+}
+.preview-textarea {
+  width: 100%; background: transparent; border: none; outline: none; resize: none;
+  font-family: var(--font-mono); font-size: 11px; color: var(--text2);
+  line-height: 1.7; height: 260px;
+  scrollbar-width: thin; scrollbar-color: var(--rule2) transparent;
+}
+.preview-textarea::placeholder { color: var(--ghost); }
+.char-count { font-family: var(--font-mono); font-size: 9px; color: var(--ghost); margin-top: 8px; text-align: right; }
+
+/* Config */
+.config-zone { padding: 20px 32px; border-bottom: 1px solid var(--rule); }
+.config-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.config-row:last-child { margin-bottom: 0; }
+.config-label { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.days-selector { display: flex; gap: 6px; }
+.day-btn {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 4px 10px; border-radius: 2px; cursor: pointer;
+  background: transparent; border: 1px solid var(--rule2); color: var(--ghost);
+  transition: all 0.15s;
+}
+.day-btn.active { border-color: var(--gold); color: var(--gold); background: rgba(201,168,76,0.08); }
+.day-btn:hover:not(.active) { border-color: var(--rule2); color: var(--text2); }
+.toggle-row { display: flex; align-items: center; gap: 8px; }
+.toggle { appearance: none; width: 28px; height: 16px; border-radius: 8px; background: var(--rule2); cursor: pointer; position: relative; transition: background 0.2s; flex-shrink: 0; }
+.toggle::after { content:''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--ghost); transition: all 0.2s; }
+.toggle:checked { background: var(--teal); }
+.toggle:checked::after { left: 14px; background: white; }
+.toggle-label { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+
+/* Analyze button */
+.analyze-zone { padding: 20px 32px; }
+.btn-analyze {
+  width: 100%; padding: 14px; border: none; cursor: pointer; border-radius: 3px;
+  font-family: var(--font-display); font-size: 15px; font-weight: 700; font-style: italic;
+  color: var(--ink); background: var(--gold);
+  transition: all 0.2s; letter-spacing: 0.02em;
+  position: relative; overflow: hidden;
+}
+.btn-analyze::before {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+  transform: translateX(-100%); transition: transform 0.4s;
+}
+.btn-analyze:hover::before { transform: translateX(100%); }
+.btn-analyze:hover { background: var(--gold2); }
+.btn-analyze:disabled { background: var(--rule2); color: var(--ghost); cursor: not-allowed; }
+.btn-analyze:disabled::before { display: none; }
+.btn-analyze .spin { display: inline-block; animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── RIGHT PANEL ─────────────────────────────────────────────────────────── */
+.right-panel {
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  height: calc(100vh - 61px);
+  position: sticky; top: 61px;
+}
+.right-panel::-webkit-scrollbar { width: 3px; }
+.right-panel::-webkit-scrollbar-track { background: transparent; }
+.right-panel::-webkit-scrollbar-thumb { background: var(--rule2); border-radius: 2px; }
+
+/* Empty state */
+.empty-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 20px; padding: 60px;
+  text-align: center;
+}
+.empty-glyph {
+  font-family: var(--font-display); font-size: 80px; font-weight: 900; font-style: italic;
+  color: var(--rule2); line-height: 1; user-select: none;
+  background: linear-gradient(180deg, var(--ink3) 0%, var(--rule) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.empty-title { font-family: var(--font-display); font-size: 20px; font-weight: 400; font-style: italic; color: var(--text3); }
+.empty-sub { font-family: var(--font-mono); font-size: 10px; color: var(--ghost); letter-spacing: 0.12em; max-width: 300px; line-height: 1.8; }
+
+/* Loading */
+.loading-state {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 24px; padding: 60px;
+}
+.loading-reel {
+  display: flex; flex-direction: column; gap: 10px; width: 240px;
+}
+.loading-track {
+  height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden;
+}
+.loading-fill {
+  height: 100%; background: var(--gold); border-radius: 1px;
+  animation: fillAnim 2s ease-in-out infinite;
+}
+@keyframes fillAnim { 0%{width:0;margin-left:0} 50%{width:100%;margin-left:0} 100%{width:0;margin-left:100%} }
+.loading-label {
+  font-family: var(--font-mono); font-size: 10px; color: var(--ghost);
+  letter-spacing: 0.15em; text-align: center;
+}
+.loading-stages { display: flex; flex-direction: column; gap: 6px; width: 240px; }
+.stage-item {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--ghost);
+}
+.stage-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--rule2); flex-shrink: 0; transition: all 0.3s; }
+.stage-item.active .stage-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); }
+.stage-item.done .stage-dot { background: var(--teal); }
+.stage-item.active { color: var(--text2); }
+.stage-item.done { color: var(--ghost); }
+
+/* ── RESULTS ─────────────────────────────────────────────────────────────── */
+.results { padding: 32px; display: flex; flex-direction: column; gap: 32px; }
+
+/* Section */
+.result-section { display: flex; flex-direction: column; gap: 16px; }
+.section-header {
+  display: flex; align-items: baseline; gap: 12px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--rule);
+}
+.section-num {
+  font-family: var(--font-mono); font-size: 9px; color: var(--ghost);
+  letter-spacing: 0.2em; flex-shrink: 0; padding-top: 3px;
+}
+.section-title {
+  font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  color: var(--cream); letter-spacing: -0.01em;
+}
+.section-sub { font-family: var(--font-mono); font-size: 9px; color: var(--ghost); margin-top: 2px; }
+
+/* Beat cards */
+.beats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.beat-card {
+  background: var(--ink2); border: 1px solid var(--rule);
+  border-radius: 3px; padding: 16px; position: relative; overflow: hidden;
+}
+.beat-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+}
+.beat-card.ki::before    { background: var(--teal); }
+.beat-card.sho::before   { background: var(--violet); }
+.beat-card.ten::before   { background: var(--amber); }
+.beat-card.ketsu::before { background: var(--gold); }
+.beat-act {
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.25em;
+  text-transform: uppercase; margin-bottom: 4px;
+}
+.beat-card.ki    .beat-act { color: var(--teal); }
+.beat-card.sho   .beat-act { color: var(--violet); }
+.beat-card.ten   .beat-act { color: var(--amber); }
+.beat-card.ketsu .beat-act { color: var(--gold); }
+.beat-name {
+  font-family: var(--font-display); font-size: 15px; font-weight: 700;
+  color: var(--cream); margin-bottom: 10px;
+}
+.beat-text { font-size: 12px; color: var(--text2); line-height: 1.7; }
+.beat-cluster {
+  margin-top: 10px; display: flex; gap: 5px; flex-wrap: wrap;
+}
+.cluster-pill {
+  font-family: var(--font-mono); font-size: 8px; padding: 2px 7px;
+  border-radius: 2px; border: 1px solid var(--rule2); color: var(--ghost);
+}
+
+/* Tags */
+.tags-section { display: flex; flex-direction: column; gap: 12px; }
+.tag-group { display: flex; flex-direction: column; gap: 6px; }
+.tag-group-label {
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--ghost);
+}
+.tag-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-pill {
+  font-family: var(--font-mono); font-size: 9px; padding: 3px 9px;
+  border-radius: 2px; border: 1px solid;
+}
+.tag-pill.topic   { color: #a78bfa; border-color: rgba(167,139,250,0.25); background: rgba(167,139,250,0.06); }
+.tag-pill.aspect  { color: var(--teal2); border-color: rgba(74,154,140,0.25); background: rgba(74,154,140,0.06); }
+.tag-pill.affect  { color: var(--gold2); border-color: rgba(232,199,106,0.25); background: rgba(232,199,106,0.06); }
+.tag-pill.code    { color: #6ee7b7; border-color: rgba(110,231,183,0.25); background: rgba(110,231,183,0.06); }
+.tag-pill.other   { color: var(--text3); border-color: var(--rule); background: transparent; }
+
+/* Community tiers */
+.tiers-grid { display: flex; flex-direction: column; gap: 8px; }
+.tier-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; background: var(--ink2); border: 1px solid var(--rule); border-radius: 3px;
+}
+.tier-left { display: flex; flex-direction: column; gap: 2px; }
+.tier-resolution { font-family: var(--font-mono); font-size: 8px; color: var(--ghost); letter-spacing: 0.12em; text-transform: uppercase; }
+.tier-label { font-size: 13px; color: var(--cream); font-weight: 500; }
+.tier-badge {
+  font-family: var(--font-mono); font-size: 9px; padding: 3px 9px;
+  border: 1px solid rgba(74,154,140,0.3); color: var(--teal2);
+  background: rgba(74,154,140,0.07); border-radius: 2px;
+}
+
+/* Smart Relations */
+.relations-list { display: flex; flex-direction: column; gap: 6px; }
+.relation-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; background: var(--ink2); border: 1px solid var(--rule); border-radius: 3px;
+}
+.relation-link { font-family: var(--font-mono); font-size: 11px; color: var(--cream); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rel-badge { font-family: var(--font-mono); font-size: 8px; padding: 2px 7px; border-radius: 2px; border: 1px solid; flex-shrink: 0; }
+.rel-badge.supports     { color: var(--teal2); border-color: rgba(74,154,140,0.3); background: rgba(74,154,140,0.07); }
+.rel-badge.contradicts  { color: var(--rose);  border-color: rgba(196,92,92,0.3);  background: rgba(196,92,92,0.07); }
+.rel-badge.potential_to { color: #a78bfa;      border-color: rgba(167,139,250,0.3);background: rgba(167,139,250,0.07); }
+.rel-badge.kinetic_to   { color: var(--gold2); border-color: rgba(232,199,106,0.3);background: rgba(232,199,106,0.07); }
+.rel-badge.motivates    { color: var(--amber);  border-color: rgba(212,121,58,0.3); background: rgba(212,121,58,0.07); }
+.rel-badge.hinders      { color: #fb923c;       border-color: rgba(251,146,60,0.3); background: rgba(251,146,60,0.07); }
+.rel-badge.related      { color: var(--ghost);  border-color: var(--rule2);         background: transparent; }
+.conf-bar { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.conf-track { width: 40px; height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden; }
+.conf-fill  { height: 100%; background: var(--gold); border-radius: 1px; }
+.conf-num   { font-family: var(--font-mono); font-size: 8px; color: var(--ghost); width: 26px; text-align: right; }
+
+/* ── THEMES ──────────────────────────────────────────────────────────────── */
+.theme-cards { display: flex; flex-direction: column; gap: 10px; }
+.theme-card {
+  background: var(--ink2); border: 1px solid var(--rule);
+  border-radius: 3px; overflow: hidden;
+}
+.theme-card-head {
+  padding: 14px 16px; cursor: pointer;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  transition: background 0.15s;
+}
+.theme-card-head:hover { background: rgba(255,255,255,0.02); }
+.theme-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--cream); margin-bottom: 4px; }
+.theme-blurb { font-size: 11px; color: var(--text2); line-height: 1.6; }
+.theme-chevron { color: var(--ghost); font-size: 10px; flex-shrink: 0; margin-top: 2px; transition: transform 0.2s; }
+.theme-chevron.open { transform: rotate(180deg); }
+.theme-card-body { padding: 0 16px 14px; border-top: 1px solid var(--rule); display: none; }
+.theme-card-body.open { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; }
+.theme-evidence { font-size: 11px; color: var(--text2); line-height: 1.65; }
+.theme-source {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.theme-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--teal2);
+  text-decoration: none; border-bottom: 1px solid rgba(74,154,140,0.3);
+  padding-bottom: 1px; transition: color 0.15s;
+  word-break: break-all;
+}
+.theme-link:hover { color: var(--teal); }
+.theme-meta { font-family: var(--font-mono); font-size: 9px; color: var(--ghost); padding: 2px 7px; border: 1px solid var(--rule); border-radius: 2px; }
+
+/* ── BIAS ────────────────────────────────────────────────────────────────── */
+.bias-overview {
+  display: flex; align-items: center; gap: 20px;
+  padding: 20px 24px; background: var(--ink2); border: 1px solid var(--rule); border-radius: 3px;
+}
+.bias-score-ring {
+  position: relative; flex-shrink: 0;
+  width: 72px; height: 72px;
+}
+.bias-score-ring svg { transform: rotate(-90deg); }
+.bias-score-ring-num {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.bias-score-val { font-family: var(--font-mono); font-size: 20px; font-weight: 500; line-height: 1; }
+.bias-score-denom { font-family: var(--font-mono); font-size: 8px; color: var(--ghost); }
+.bias-overview-text { flex: 1; }
+.bias-overview-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--cream); margin-bottom: 3px; }
+.bias-overview-sub { font-size: 11px; color: var(--text3); line-height: 1.55; }
+.bias-scale { display: flex; gap: 4px; margin-top: 8px; }
+.scale-step { flex: 1; height: 3px; border-radius: 1px; }
+
+.bias-groups { display: flex; flex-direction: column; gap: 16px; }
+.bias-group-title {
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase; color: var(--ghost);
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.bias-group-avg { color: var(--text3); font-size: 10px; }
+.subdim-rows { display: flex; flex-direction: column; gap: 6px; }
+.subdim-row {
+  background: var(--ink2); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden;
+}
+.subdim-head {
+  padding: 10px 14px; cursor: pointer;
+  display: flex; align-items: center; gap: 10px;
+  transition: background 0.15s;
+}
+.subdim-head:hover { background: rgba(255,255,255,0.02); }
+.subdim-name { font-size: 12px; color: var(--text2); flex: 1; text-transform: capitalize; }
+.subdim-score {
+  font-family: var(--font-mono); font-size: 14px; font-weight: 500;
+  width: 32px; text-align: right;
+}
+.subdim-score.s0,.subdim-score.s1 { color: var(--teal2); }
+.subdim-score.s2 { color: var(--gold2); }
+.subdim-score.s3,.subdim-score.s4,.subdim-score.s5 { color: var(--rose); }
+.subdim-score.na { color: var(--ghost); font-size: 10px; }
+.subdim-conf { font-family: var(--font-mono); font-size: 8px; color: var(--ghost); width: 28px; text-align: right; }
+.subdim-chevron { color: var(--ghost); font-size: 10px; transition: transform 0.2s; }
+.subdim-chevron.open { transform: rotate(180deg); }
+.subdim-body { display: none; padding: 0 14px 12px; border-top: 1px solid var(--rule); }
+.subdim-body.open { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.subdim-bar { height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden; margin-bottom: 2px; }
+.subdim-bar-fill { height: 100%; border-radius: 1px; transition: width 0.6s ease; }
+.subdim-bar-fill.s0,.subdim-bar-fill.s1 { background: var(--teal); }
+.subdim-bar-fill.s2 { background: var(--gold); }
+.subdim-bar-fill.s3,.subdim-bar-fill.s4,.subdim-bar-fill.s5 { background: var(--rose); }
+.subdim-evidence { display: flex; flex-direction: column; gap: 4px; }
+.evidence-item { display: flex; gap: 8px; font-size: 11px; color: var(--text3); line-height: 1.6; }
+.evidence-item::before { content: '›'; color: var(--ghost); flex-shrink: 0; }
+.insufficient { font-size: 11px; color: var(--ghost); font-style: italic; }
+
+/* ── ERROR ───────────────────────────────────────────────────────────────── */
+.error-banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 24px 32px 0; padding: 12px 16px;
+  background: rgba(196,92,92,0.07); border: 1px solid rgba(196,92,92,0.25); border-radius: 3px;
+  font-size: 12px; color: #f87171; line-height: 1.5;
+}
+.error-banner strong { font-weight: 600; }
+
+/* ── API CONFIG MODAL ────────────────────────────────────────────────────── */
+.modal-ov {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; backdrop-filter: blur(4px);
+  opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+.modal-ov.open { opacity: 1; pointer-events: auto; }
+.modal {
+  background: var(--ink2); border: 1px solid var(--rule2);
+  border-radius: 4px; padding: 32px; width: 520px; max-width: 90vw;
+}
+.modal-title { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--cream); margin-bottom: 6px; }
+.modal-sub { font-size: 12px; color: var(--text3); margin-bottom: 24px; line-height: 1.6; }
+.field-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+.field-label { font-family: var(--font-mono); font-size: 9px; color: var(--ghost); letter-spacing: 0.15em; text-transform: uppercase; }
+.field-input {
+  background: var(--ink); border: 1px solid var(--rule2); border-radius: 3px;
+  padding: 9px 12px; font-family: var(--font-mono); font-size: 11px; color: var(--cream);
+  width: 100%; outline: none; transition: border-color 0.15s;
+}
+.field-input:focus { border-color: var(--gold); }
+.field-hint { font-family: var(--font-mono); font-size: 9px; color: var(--ghost); }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.btn-secondary {
+  padding: 8px 20px; background: transparent; border: 1px solid var(--rule2);
+  color: var(--text3); border-radius: 2px; cursor: pointer; font-family: var(--font-body); font-size: 12px;
+  transition: all 0.15s;
+}
+.btn-secondary:hover { border-color: var(--rule); color: var(--text2); }
+.btn-primary {
+  padding: 8px 20px; background: var(--gold); border: none;
+  color: var(--ink); border-radius: 2px; cursor: pointer; font-family: var(--font-body); font-size: 12px; font-weight: 600;
+  transition: all 0.15s;
+}
+.btn-primary:hover { background: var(--gold2); }
+
+/* Config gear */
+.config-btn {
+  background: none; border: 1px solid var(--rule); border-radius: 2px;
+  color: var(--ghost); cursor: pointer; padding: 5px 9px; font-size: 12px;
+  transition: all 0.15s; display: flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
+}
+.config-btn:hover { border-color: var(--rule2); color: var(--text2); }
+
+/* Responsive */
+@media (max-width: 900px) {
+  .main-grid { grid-template-columns: 1fr; }
+  .left-panel, .right-panel { height: auto; position: static; }
+  .beats-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="wordmark">
+    <div class="wordmark-nie">N<em>I</em>E</div>
+    <div class="wordmark-full">Narrative Intelligence Engine</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div class="topbar-status">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">not connected</span>
+    </div>
+    <button class="config-btn" onclick="openConfig()">⚙ configure api</button>
+  </div>
+</header>
+
+<!-- MAIN -->
+<div class="main-grid">
+
+  <!-- LEFT: UPLOAD + CONTROLS -->
+  <aside class="left-panel">
+
+    <div class="upload-zone">
+      <div class="upload-zone-label">01 — Script Input</div>
+      <div class="drop-target" id="drop-target"
+           ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+        <input type="file" id="file-input" accept=".md,.txt,.fountain,.fdx" onchange="onFileChange(event)">
+        <div class="drop-icon">↑</div>
+        <div class="drop-title">Drop your script here</div>
+        <div class="drop-sub">.md · .txt · .fountain · .fdx</div>
+      </div>
+      <div class="file-loaded" id="file-loaded" style="display:none">
+        <span class="file-loaded-name" id="file-loaded-name"></span>
+        <button class="file-clear" onclick="clearFile()">×</button>
+      </div>
+    </div>
+
+    <div class="script-preview">
+      <div class="preview-label">Script / Paste Text</div>
+      <textarea class="preview-textarea" id="script-text"
+        placeholder="Paste your script, scene, or story notes here…&#10;&#10;Or upload a file above."
+        oninput="updateCharCount()"></textarea>
+      <div class="char-count" id="char-count">0 characters</div>
+    </div>
+
+    <div class="config-zone">
+      <div class="config-row">
+        <span class="config-label">Trend recency</span>
+        <div class="days-selector">
+          <button class="day-btn active" data-days="30" onclick="selectDays(30,this)">30d</button>
+          <button class="day-btn" data-days="50" onclick="selectDays(50,this)">50d</button>
+          <button class="day-btn" data-days="100" onclick="selectDays(100,this)">100d</button>
+        </div>
+      </div>
+      <div class="config-row">
+        <span class="config-label">Vault analysis</span>
+        <label class="toggle-row">
+          <input type="checkbox" class="toggle" id="toggle-vault" checked>
+          <span class="toggle-label">Smart Relations + Beat Map</span>
+        </label>
+      </div>
+      <div class="config-row">
+        <span class="config-label">Trend & Bias</span>
+        <label class="toggle-row">
+          <input type="checkbox" class="toggle" id="toggle-trendbias" checked>
+          <span class="toggle-label">Themes + Bias Dashboard</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="analyze-zone">
+      <button class="btn-analyze" id="btn-analyze" onclick="runAnalysis()" disabled>
+        Analyze Script
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- RIGHT: RESULTS -->
+  <main class="right-panel" id="right-panel">
+
+    <!-- empty state -->
+    <div class="empty-state" id="state-empty">
+      <div class="empty-glyph">NIE</div>
+      <div class="empty-title">Waiting for your script</div>
+      <div class="empty-sub">Upload a file or paste text on the left, configure your API endpoints, then click Analyze.</div>
+    </div>
+
+    <!-- loading state -->
+    <div class="loading-state" id="state-loading" style="display:none">
+      <div class="loading-reel">
+        <div class="loading-track"><div class="loading-fill"></div></div>
+      </div>
+      <div class="loading-stages" id="loading-stages">
+        <div class="stage-item" id="stage-upload"><span class="stage-dot"></span>Uploading & parsing script</div>
+        <div class="stage-item" id="stage-relations"><span class="stage-dot"></span>Smart Relations · Leiden communities</div>
+        <div class="stage-item" id="stage-topics"><span class="stage-dot"></span>BERTopic · spaCy · affect/code tags</div>
+        <div class="stage-item" id="stage-arc"><span class="stage-dot"></span>Generating narrative arc</div>
+        <div class="stage-item" id="stage-trends"><span class="stage-dot"></span>Themes & real-world context</div>
+        <div class="stage-item" id="stage-bias"><span class="stage-dot"></span>Bias analysis (Gemini)</div>
+      </div>
+    </div>
+
+    <!-- results -->
+    <div id="state-results" style="display:none">
+
+      <!-- error banner (inside results panel) -->
+      <div class="error-banner" id="error-banner" style="display:none">
+        <strong>Error —</strong>&nbsp;<span id="error-text"></span>
+      </div>
+
+      <div class="results" id="results-content">
+
+        <!-- 01: NARRATIVE ARC -->
+        <div class="result-section" id="section-arc" style="display:none">
+          <div class="section-header">
+            <div class="section-num">01</div>
+            <div>
+              <div class="section-title">Narrative Arc</div>
+              <div class="section-sub">Kishōtenketsu · 4-act structure derived from Leiden community clusters</div>
+            </div>
+          </div>
+          <div class="beats-grid" id="beats-grid"></div>
+        </div>
+
+        <!-- 02: NARRATIVE POSITION -->
+        <div class="result-section" id="section-position" style="display:none">
+          <div class="section-header">
+            <div class="section-num">02</div>
+            <div>
+              <div class="section-title">Narrative Position</div>
+              <div class="section-sub">Leiden community membership at macro (Act) and micro (Scene) resolution</div>
+            </div>
+          </div>
+          <div class="tiers-grid" id="tiers-grid"></div>
+        </div>
+
+        <!-- 03: GENERATED TAGS -->
+        <div class="result-section" id="section-tags" style="display:none">
+          <div class="section-header">
+            <div class="section-num">03</div>
+            <div>
+              <div class="section-title">Generated Tags</div>
+              <div class="section-sub">BERTopic · spaCy NER · affect classification · code classification</div>
+            </div>
+          </div>
+          <div class="tags-section" id="tags-section"></div>
+        </div>
+
+        <!-- 04: SMART RELATIONS -->
+        <div class="result-section" id="section-relations" style="display:none">
+          <div class="section-header">
+            <div class="section-num">04</div>
+            <div>
+              <div class="section-title">Smart Relations</div>
+              <div class="section-sub">Top-5 embedding neighbors · inferred relation type · cosine confidence</div>
+            </div>
+          </div>
+          <div class="relations-list" id="relations-list"></div>
+        </div>
+
+        <!-- 05: THEMES & TRENDS -->
+        <div class="result-section" id="section-themes" style="display:none">
+          <div class="section-header">
+            <div class="section-num">05</div>
+            <div>
+              <div class="section-title">Themes &amp; Real-World Context</div>
+              <div class="section-sub">Gemini + Google Search · grounded in last <span id="days-label">30</span> days</div>
+            </div>
+          </div>
+          <div class="theme-cards" id="theme-cards"></div>
+        </div>
+
+        <!-- 06: BIAS DASHBOARD -->
+        <div class="result-section" id="section-bias" style="display:none">
+          <div class="section-header">
+            <div class="section-num">06</div>
+            <div>
+              <div class="section-title">Bias Dashboard</div>
+              <div class="section-sub">Gendered action bias · linguistic bias · 0 = none, 5 = pervasive</div>
+            </div>
+          </div>
+          <div id="bias-content"></div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+</div>
+
+</div><!-- .shell -->
+
+<!-- CONFIG MODAL -->
+<div class="modal-ov" id="config-modal">
+  <div class="modal">
+    <div class="modal-title">API Configuration</div>
+    <div class="modal-sub">Set the base URLs for both backends. These are stored in your browser's localStorage and never sent anywhere except the APIs themselves.</div>
+    <div class="field-group">
+      <label class="field-label">Naf's Vault API</label>
+      <input class="field-input" id="input-naf-api" placeholder="https://your-vault-api.onrender.com">
+      <div class="field-hint">Your deployed Render URL for server.py — see setup guide below</div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Courtney's Trend & Bias API</label>
+      <input class="field-input" id="input-courtney-api" placeholder="https://script-trend-bias-analyzer.onrender.com">
+      <div class="field-hint">Deployed Gemini + Google Search backend</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeConfig()">Cancel</button>
+      <button class="btn-primary" onclick="saveConfig()">Save & Test</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────────────
+const DEFAULT_COURTNEY_API = 'https://script-trend-bias-analyzer.onrender.com'
+const DEFAULT_NAF_API = 'https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com'
+let nafApi = localStorage.getItem('nie_naf_api') || DEFAULT_NAF_API
+let courtneyApi = localStorage.getItem('nie_courtney_api') || DEFAULT_COURTNEY_API
+let daysBack = 30
+let scriptText = ''
+let currentFile = null
+
+// ── INIT ──────────────────────────────────────────────────────────────────
+document.getElementById('input-naf-api').value = nafApi
+document.getElementById('input-courtney-api').value = courtneyApi
+checkHealth()
+setInterval(checkHealth, 15000)
+
+async function checkHealth() {
+  const dot = document.getElementById('status-dot')
+  const txt = document.getElementById('status-text')
+  try {
+    const r = await fetch(`${nafApi}/health`, { signal: AbortSignal.timeout(3000) })
+    if (r.ok) {
+      const d = await r.json()
+      dot.className = 'status-dot live'
+      txt.textContent = `${d.nodes} nodes · ${d.edges} edges`
+    } else throw new Error()
+  } catch {
+    dot.className = 'status-dot error'
+    txt.textContent = 'backend offline'
+  }
+}
+
+// ── CONFIG ────────────────────────────────────────────────────────────────
+function openConfig() {
+  document.getElementById('input-naf-api').value = nafApi
+  document.getElementById('input-courtney-api').value = courtneyApi
+  document.getElementById('config-modal').classList.add('open')
+}
+function closeConfig() {
+  document.getElementById('config-modal').classList.remove('open')
+}
+async function saveConfig() {
+  nafApi = document.getElementById('input-naf-api').value.trim().replace(/\/$/, '')
+  courtneyApi = document.getElementById('input-courtney-api').value.trim().replace(/\/$/, '')
+  localStorage.setItem('nie_naf_api', nafApi)
+  localStorage.setItem('nie_courtney_api', courtneyApi)
+  closeConfig()
+  await checkHealth()
+}
+
+// ── FILE HANDLING ─────────────────────────────────────────────────────────
+function onFileChange(e) {
+  const file = e.target.files[0]
+  if (file) loadFile(file)
+}
+function onDragOver(e) {
+  e.preventDefault()
+  document.getElementById('drop-target').classList.add('drag-over')
+}
+function onDragLeave() {
+  document.getElementById('drop-target').classList.remove('drag-over')
+}
+function onDrop(e) {
+  e.preventDefault()
+  document.getElementById('drop-target').classList.remove('drag-over')
+  const file = e.dataTransfer.files[0]
+  if (file) loadFile(file)
+}
+function loadFile(file) {
+  currentFile = file
+  document.getElementById('file-loaded').style.display = 'flex'
+  document.getElementById('file-loaded-name').textContent = file.name
+  const reader = new FileReader()
+  reader.onload = (ev) => {
+    scriptText = ev.target.result
+    document.getElementById('script-text').value = scriptText
+    updateCharCount()
+    updateAnalyzeBtn()
+  }
+  reader.readAsText(file)
+}
+function clearFile() {
+  currentFile = null
+  document.getElementById('file-loaded').style.display = 'none'
+  document.getElementById('file-input').value = ''
+  document.getElementById('script-text').value = ''
+  scriptText = ''
+  updateCharCount()
+  updateAnalyzeBtn()
+}
+function updateCharCount() {
+  scriptText = document.getElementById('script-text').value
+  document.getElementById('char-count').textContent = `${scriptText.length.toLocaleString()} characters`
+  updateAnalyzeBtn()
+}
+function updateAnalyzeBtn() {
+  document.getElementById('btn-analyze').disabled = !scriptText.trim()
+}
+
+// ── DAYS SELECTOR ─────────────────────────────────────────────────────────
+function selectDays(d, btn) {
+  daysBack = d
+  document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'))
+  btn.classList.add('active')
+}
+
+// ── STAGE HELPERS ─────────────────────────────────────────────────────────
+function setStage(id, status) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.className = 'stage-item ' + status
+}
+function showState(which) {
+  ['empty','loading','results'].forEach(s => {
+    document.getElementById('state-' + s).style.display = s === which ? (s === 'results' ? 'block' : 'flex') : 'none'
+  })
+}
+
+// ── MAIN ANALYSIS ─────────────────────────────────────────────────────────
+async function runAnalysis() {
+  const text = document.getElementById('script-text').value.trim()
+  if (!text) return
+
+  const doVault = document.getElementById('toggle-vault').checked
+  const doTrendBias = document.getElementById('toggle-trendbias').checked
+
+  // Reset UI
+  showState('loading')
+  ;['section-arc','section-position','section-tags','section-relations','section-themes','section-bias'].forEach(id => {
+    document.getElementById(id).style.display = 'none'
+  })
+  document.getElementById('error-banner').style.display = 'none'
+  ;['stage-upload','stage-relations','stage-topics','stage-arc','stage-trends','stage-bias'].forEach(id => setStage(id, ''))
+
+  document.getElementById('days-label').textContent = daysBack
+
+  try {
+    let analyzeResult = null
+    let arcResult = null
+    let trendResult = null
+    let biasResult = null
+    const errors = []
+
+    // ── VAULT PIPELINE ──────────────────────────────────────────────────
+    if (doVault) {
+      // Stage: upload
+      setStage('stage-upload', 'active')
+      try {
+        const form = new FormData()
+        const blob = new Blob([text], { type: 'text/plain' })
+        const fname = currentFile ? currentFile.name : 'script.txt'
+        form.append('file', blob, fname)
+        const r = await fetch(`${nafApi}/upload`, { method: 'POST', body: form })
+        if (!r.ok) throw new Error(`Upload failed: ${r.status}`)
+        analyzeResult = await r.json()
+        setStage('stage-upload', 'done')
+        setStage('stage-relations', 'done')
+        setStage('stage-topics', 'done')
+      } catch (e) {
+        setStage('stage-upload', '')
+        errors.push('Vault API: ' + e.message)
+      }
+
+      // Stage: arc generation
+      setStage('stage-arc', 'active')
+      try {
+        const r = await fetch(`${nafApi}/graph/generate-arc`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ locked_acts: [] }),
+        })
+        if (!r.ok) throw new Error(`Arc failed: ${r.status}`)
+        arcResult = await r.json()
+        setStage('stage-arc', 'done')
+      } catch (e) {
+        setStage('stage-arc', '')
+        errors.push('Arc: ' + e.message)
+      }
+    } else {
+      ;['stage-upload','stage-relations','stage-topics','stage-arc'].forEach(id => setStage(id, 'done'))
+    }
+
+    // ── TREND & BIAS ────────────────────────────────────────────────────
+    if (doTrendBias) {
+      if (!courtneyApi) {
+        errors.push('Trend/Bias API URL not configured — click ⚙ configure api')
+        ;['stage-trends','stage-bias'].forEach(id => setStage(id, ''))
+      } else {
+        setStage('stage-trends', 'active')
+        setStage('stage-bias', 'active')
+        try {
+          const [tr, br] = await Promise.all([
+            fetch(`${courtneyApi}/themes-and-trends`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ notes: text, days_back: daysBack }),
+            }),
+            fetch(`${courtneyApi}/bias-score`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ script: text }),
+            }),
+          ])
+          if (tr.ok) { trendResult = await tr.json(); setStage('stage-trends', 'done') }
+          else { errors.push('Themes: ' + tr.status); setStage('stage-trends', '') }
+          if (br.ok) { biasResult = await br.json(); setStage('stage-bias', 'done') }
+          else { errors.push('Bias: ' + br.status); setStage('stage-bias', '') }
+        } catch (e) {
+          errors.push('Trend/Bias: ' + e.message)
+          ;['stage-trends','stage-bias'].forEach(id => setStage(id, ''))
+        }
+      }
+    } else {
+      ;['stage-trends','stage-bias'].forEach(id => setStage(id, 'done'))
+    }
+
+    // ── RENDER ──────────────────────────────────────────────────────────
+    await new Promise(r => setTimeout(r, 300)) // brief pause so user sees completion
+    showState('results')
+
+    if (errors.length) {
+      document.getElementById('error-banner').style.display = 'flex'
+      document.getElementById('error-text').textContent = errors.join(' · ')
+    }
+
+    if (arcResult) renderArc(arcResult)
+    if (analyzeResult) {
+      renderPosition(analyzeResult.community_tiers)
+      renderTags(analyzeResult.metadata.tags)
+      renderRelations(analyzeResult.metadata.smart_relations)
+    }
+    if (trendResult) renderThemes(trendResult.themes)
+    if (biasResult)  renderBias(biasResult)
+
+  } catch (e) {
+    showState('results')
+    document.getElementById('error-banner').style.display = 'flex'
+    document.getElementById('error-text').textContent = e.message
+  }
+}
+
+// ── RENDER: ARC ───────────────────────────────────────────────────────────
+function renderArc(data) {
+  const acts = [
+    { key: 'ki',    name: 'Ki',    sub: 'Establish' },
+    { key: 'sho',   name: 'Shō',   sub: 'Develop'   },
+    { key: 'ten',   name: 'Ten',   sub: 'Twist'      },
+    { key: 'ketsu', name: 'Ketsu', sub: 'Resolve'    },
+  ]
+  const grid = document.getElementById('beats-grid')
+  grid.innerHTML = acts.map(a => {
+    const text = data[a.key] || ''
+    const clusters = (data.clusters_used?.[a.key] ?? []).map(c => `<span class="cluster-pill">cluster ${c}</span>`).join('')
+    return `<div class="beat-card ${a.key}">
+      <div class="beat-act">${a.sub}</div>
+      <div class="beat-name">${a.name}</div>
+      <div class="beat-text">${text || '<em style="color:var(--ghost)">Not generated.</em>'}</div>
+      ${clusters ? `<div class="beat-cluster">${clusters}</div>` : ''}
+    </div>`
+  }).join('')
+  document.getElementById('section-arc').style.display = ''
+}
+
+// ── RENDER: POSITION ──────────────────────────────────────────────────────
+function renderPosition(tiers) {
+  if (!tiers?.length) return
+  const g = document.getElementById('tiers-grid')
+  g.innerHTML = tiers.map(t => {
+    const res = t.resolution <= 0.6 ? 'Act · macro (γ=0.5)' : t.resolution >= 1.8 ? 'Scene · micro (γ=2.0)' : `γ=${t.resolution}`
+    return `<div class="tier-row">
+      <div class="tier-left">
+        <div class="tier-resolution">${res}</div>
+        <div class="tier-label">${t.label}</div>
+      </div>
+      <div class="tier-badge">cluster ${t.community_id}</div>
+    </div>`
+  }).join('')
+  document.getElementById('section-position').style.display = ''
+}
+
+// ── RENDER: TAGS ──────────────────────────────────────────────────────────
+function renderTags(tags) {
+  if (!tags?.length) return
+  const groups = {}
+  for (const tag of tags) {
+    const prefix = tag.split('/')[0] || 'other'
+    ;(groups[prefix] = groups[prefix] || []).push(tag)
+  }
+  const container = document.getElementById('tags-section')
+  container.innerHTML = Object.entries(groups).map(([prefix, groupTags]) => {
+    const pills = groupTags.map(t => {
+      const label = t.split('/').slice(1).join('/')
+      return `<span class="tag-pill ${prefix}">${label}</span>`
+    }).join('')
+    return `<div class="tag-group">
+      <div class="tag-group-label">${prefix}</div>
+      <div class="tag-pills">${pills}</div>
+    </div>`
+  }).join('')
+  document.getElementById('section-tags').style.display = ''
+}
+
+// ── RENDER: RELATIONS ─────────────────────────────────────────────────────
+function renderRelations(relations) {
+  if (!relations?.length) return
+  const list = document.getElementById('relations-list')
+  list.innerHTML = relations.map(r => {
+    const pct = Math.round(r.confidence * 100)
+    return `<div class="relation-row">
+      <div class="relation-link">${r.link}</div>
+      <div class="rel-badge ${r.type}">${r.type}</div>
+      <div class="conf-bar">
+        <div class="conf-track"><div class="conf-fill" style="width:${pct}%"></div></div>
+        <div class="conf-num">${pct}%</div>
+      </div>
+    </div>`
+  }).join('')
+  document.getElementById('section-relations').style.display = ''
+}
+
+// ── RENDER: THEMES ────────────────────────────────────────────────────────
+function renderThemes(themes) {
+  if (!themes?.length) return
+  const container = document.getElementById('theme-cards')
+  container.innerHTML = themes.map((t, i) => `
+    <div class="theme-card">
+      <div class="theme-card-head" onclick="toggleTheme(${i})">
+        <div>
+          <div class="theme-title">${t.theme}</div>
+          <div class="theme-blurb">${t.relevance_blurb}</div>
+        </div>
+        <span class="theme-chevron" id="theme-chev-${i}">▾</span>
+      </div>
+      <div class="theme-card-body" id="theme-body-${i}">
+        <div class="theme-evidence">${t.evidence_note}</div>
+        <div class="theme-source">
+          <a class="theme-link" href="${t.source_url}" target="_blank" rel="noopener">
+            ↗ ${t.source_title}
+          </a>
+          <span class="theme-meta">${t.source_type}</span>
+          ${t.published_date ? `<span class="theme-meta">${t.published_date}</span>` : ''}
+        </div>
+      </div>
+    </div>`).join('')
+  document.getElementById('section-themes').style.display = ''
+}
+function toggleTheme(i) {
+  const body = document.getElementById(`theme-body-${i}`)
+  const chev = document.getElementById(`theme-chev-${i}`)
+  const open = body.classList.toggle('open')
+  chev.classList.toggle('open', open)
+}
+
+// ── RENDER: BIAS ──────────────────────────────────────────────────────────
+function renderBias(data) {
+  const { bias_1, bias_2, overall_bias_score } = data
+
+  // Ring SVG
+  const r = 28, cx = 36, cy = 36, circ = 2 * Math.PI * r
+  const pct = overall_bias_score / 100
+  const dash = circ * pct
+  const scoreColour = overall_bias_score <= 20 ? '#4a9a8c' : overall_bias_score <= 40 ? '#c9a84c' : '#c45c5c'
+  const ringHtml = `
+    <div class="bias-score-ring">
+      <svg width="72" height="72" viewBox="0 0 72 72">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--rule)" stroke-width="4"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${scoreColour}" stroke-width="4"
+          stroke-dasharray="${dash.toFixed(1)} ${circ.toFixed(1)}" stroke-linecap="round"/>
+      </svg>
+      <div class="bias-score-ring-num">
+        <span class="bias-score-val" style="color:${scoreColour}">${overall_bias_score}</span>
+        <span class="bias-score-denom">/100</span>
+      </div>
+    </div>`
+
+  // Scale bar
+  const scaleColors = ['#4a9a8c','#6abcae','#c9a84c','#d4793a','#c45c5c','#a03030']
+  const scaleHtml = `<div class="bias-scale">${scaleColors.map(c => `<div class="scale-step" style="background:${c}"></div>`).join('')}</div>`
+
+  const subdims = [
+    { group:'bias_1', label:'Gendered Action Bias', avg: bias_1.bias_1_score.toFixed(1), dims: [
+      { key:'agency_gap',           data: bias_1.agency_gap },
+      { key:'gaze_objectification', data: bias_1.gaze_objectification },
+      { key:'affection_asymmetry',  data: bias_1.affection_asymmetry },
+    ]},
+    { group:'bias_2', label:'Linguistic Bias', avg: bias_2.bias_2_score.toFixed(1), dims: [
+      { key:'linguistic_stereotyping',  data: bias_2.linguistic_stereotyping },
+      { key:'dialogue_power_imbalance', data: bias_2.dialogue_power_imbalance },
+    ]},
+  ]
+
+  let groupsHtml = subdims.map(g => {
+    const rows = g.dims.map((d,i) => {
+      const uid = `${g.group}_${d.key}`
+      const s = d.data.score
+      const sClass = s === 'insufficient_evidence' ? 'na' : `s${s}`
+      const scoreDisplay = s === 'insufficient_evidence' ? '—' : `${s}<span style="font-size:8px;color:var(--ghost);font-weight:400">/5</span>`
+      const conf = Math.round(d.data.confidence * 100)
+      const pctBar = s === 'insufficient_evidence' ? 0 : (parseInt(s)/5)*100
+      const evidence = d.data.evidence.map(e => `<div class="evidence-item">${e}</div>`).join('')
+      const insufficient = s === 'insufficient_evidence' ? '<div class="insufficient">Insufficient evidence in the provided text.</div>' : ''
+      return `<div class="subdim-row">
+        <div class="subdim-head" onclick="toggleSubdim('${uid}')">
+          <div class="subdim-name">${d.key.replace(/_/g,' ')}</div>
+          <div class="subdim-score ${sClass}">${scoreDisplay}</div>
+          <div class="subdim-conf">${conf}%</div>
+          <span class="subdim-chevron" id="chev-${uid}">▾</span>
+        </div>
+        <div class="subdim-body" id="body-${uid}">
+          ${s !== 'insufficient_evidence' ? `<div class="subdim-bar"><div class="subdim-bar-fill ${sClass}" style="width:${pctBar}%"></div></div>` : ''}
+          <div class="subdim-evidence">${evidence}${insufficient}</div>
+        </div>
+      </div>`
+    }).join('')
+    return `<div class="bias-group">
+      <div class="bias-group-title">${g.label}<span class="bias-group-avg">avg ${g.avg}/5</span></div>
+      <div class="subdim-rows">${rows}</div>
+    </div>`
+  }).join('')
+
+  document.getElementById('bias-content').innerHTML = `
+    <div class="bias-overview">
+      ${ringHtml}
+      <div class="bias-overview-text">
+        <div class="bias-overview-title">Overall bias score</div>
+        <div class="bias-overview-sub">Composite of Gendered Action (${bias_1.bias_1_score.toFixed(1)}/5) and Linguistic (${bias_2.bias_2_score.toFixed(1)}/5) dimensions.</div>
+        ${scaleHtml}
+      </div>
+    </div>
+    <div class="bias-groups" style="margin-top:14px">${groupsHtml}</div>`
+
+  document.getElementById('section-bias').style.display = ''
+}
+
+function toggleSubdim(uid) {
+  const body = document.getElementById(`body-${uid}`)
+  const chev = document.getElementById(`chev-${uid}`)
+  const open = body.classList.toggle('open')
+  chev.classList.toggle('open', open)
+}
+</script>
+</body>
+</html>
