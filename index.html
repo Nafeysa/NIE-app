@@ -770,7 +770,7 @@ body::before {
 <script>
 // ── STATE ─────────────────────────────────────────────────────────────────
 const DEFAULT_COURTNEY_API = 'https://script-trend-bias-analyzer.onrender.com'
-const DEFAULT_NAF_API = 'https://zettlebank.onrender.com'
+const DEFAULT_NAF_API = 'https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com'
 let nafApi = localStorage.getItem('nie_naf_api') || DEFAULT_NAF_API
 let courtneyApi = localStorage.getItem('nie_courtney_api') || DEFAULT_COURTNEY_API
 let daysBack = 30
@@ -780,23 +780,59 @@ let currentFile = null
 // ── INIT ──────────────────────────────────────────────────────────────────
 document.getElementById('input-naf-api').value = nafApi
 document.getElementById('input-courtney-api').value = courtneyApi
-checkHealth()
-setInterval(checkHealth, 15000)
+// Wake the server immediately on page load (handles Render cold start)
+wakeServer()
+// Then re-check every 30 seconds quietly
+setInterval(() => checkHealth(true), 30000)
 
-async function checkHealth() {
+async function checkHealth(quiet = false) {
   const dot = document.getElementById('status-dot')
   const txt = document.getElementById('status-text')
+  if (!quiet) {
+    dot.className = 'status-dot'
+    txt.textContent = 'connecting…'
+  }
   try {
-    const r = await fetch(`${nafApi}/health`, { signal: AbortSignal.timeout(3000) })
+    // 20s timeout — Render free tier cold start can take 15–90s
+    const r = await fetch(`${nafApi}/health`, { signal: AbortSignal.timeout(20000) })
     if (r.ok) {
       const d = await r.json()
       dot.className = 'status-dot live'
       txt.textContent = `${d.nodes} nodes · ${d.edges} edges`
+      return true
     } else throw new Error()
   } catch {
     dot.className = 'status-dot error'
     txt.textContent = 'backend offline'
+    return false
   }
+}
+
+// Wake the Render server on page load — Render free tier sleeps after 15min inactivity.
+// This fires a background ping immediately so the server is warm by the time
+// the user clicks Analyze. The status dot shows progress.
+async function wakeServer() {
+  const dot = document.getElementById('status-dot')
+  const txt = document.getElementById('status-text')
+  dot.className = 'status-dot'
+  txt.textContent = 'waking server…'
+  // Poll up to 10 times (90s total) until the server responds
+  for (let i = 0; i < 10; i++) {
+    try {
+      const r = await fetch(`${nafApi}/health`, { signal: AbortSignal.timeout(12000) })
+      if (r.ok) {
+        const d = await r.json()
+        dot.className = 'status-dot live'
+        txt.textContent = `${d.nodes} nodes · ${d.edges} edges`
+        return true
+      }
+    } catch {}
+    // Small pause between retries
+    await new Promise(res => setTimeout(res, 3000))
+  }
+  dot.className = 'status-dot error'
+  txt.textContent = 'backend offline'
+  return false
 }
 
 // ── CONFIG ────────────────────────────────────────────────────────────────
@@ -912,22 +948,41 @@ async function runAnalysis() {
 
     // ── VAULT PIPELINE ──────────────────────────────────────────────────
     if (doVault) {
-      // Stage: upload
+      // Wake the server first if it appears offline (Render cold start)
+      const dot = document.getElementById('status-dot')
+      if (!dot.classList.contains('live')) {
+        setStage('stage-upload', 'active')
+        document.getElementById('loading-stages').querySelector('#stage-upload span.stage-dot').style.background = 'var(--gold)'
+        // Update loading label to show we're waking the server
+        const lbl = document.querySelector('.loading-label')
+        if (lbl) lbl.textContent = 'Waking server (Render cold start ~30s)…'
+        await wakeServer()
+        if (lbl) lbl.textContent = ''
+      }
+
+      // Stage: upload — 3 minute timeout for BERTopic/spaCy which are slow on first run
       setStage('stage-upload', 'active')
       try {
         const form = new FormData()
         const blob = new Blob([text], { type: 'text/plain' })
         const fname = currentFile ? currentFile.name : 'script.txt'
         form.append('file', blob, fname)
-        const r = await fetch(`${nafApi}/upload`, { method: 'POST', body: form })
-        if (!r.ok) throw new Error(`Upload failed: ${r.status}`)
+        const r = await fetch(`${nafApi}/upload`, {
+          method: 'POST',
+          body: form,
+          signal: AbortSignal.timeout(180000),  // 3 min — BERTopic fit can be slow
+        })
+        if (!r.ok) throw new Error(`Upload failed: ${r.status} — ${await r.text()}`)
         analyzeResult = await r.json()
         setStage('stage-upload', 'done')
         setStage('stage-relations', 'done')
         setStage('stage-topics', 'done')
       } catch (e) {
         setStage('stage-upload', '')
-        errors.push('Vault API: ' + e.message)
+        const msg = e.name === 'TimeoutError'
+          ? 'Vault API timed out after 3 min. The BERTopic model may still be loading — try again in 30s.'
+          : 'Vault API: ' + e.message
+        errors.push(msg)
       }
 
       // Stage: arc generation
@@ -937,6 +992,7 @@ async function runAnalysis() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ locked_acts: [] }),
+          signal: AbortSignal.timeout(120000),  // 2 min
         })
         if (!r.ok) throw new Error(`Arc failed: ${r.status}`)
         arcResult = await r.json()
@@ -958,16 +1014,19 @@ async function runAnalysis() {
         setStage('stage-trends', 'active')
         setStage('stage-bias', 'active')
         try {
+          // Gemini calls typically take 10–30s — 90s timeout
           const [tr, br] = await Promise.all([
             fetch(`${courtneyApi}/themes-and-trends`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ notes: text, days_back: daysBack }),
+              signal: AbortSignal.timeout(90000),
             }),
             fetch(`${courtneyApi}/bias-score`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ script: text }),
+              signal: AbortSignal.timeout(90000),
             }),
           ])
           if (tr.ok) { trendResult = await tr.json(); setStage('stage-trends', 'done') }
